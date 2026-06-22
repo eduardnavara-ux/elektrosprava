@@ -585,7 +585,7 @@ const S = {
   tabs: { display: "flex", gap: 8, marginBottom: 22, flexWrap: "wrap" },
   tab: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, background: "#fff", border: "1px solid #e3e0d4", borderRadius: 11, padding: "10px 14px", cursor: "pointer", fontFamily: "inherit", minWidth: 110 },
   tabOn: { background: ACCENT, borderColor: ACCENT },
-  tabName: { fontSize: 13.5, fontWeight: 700, color: "inherit" },
+  tabName: { fontSize: 13.5, fontWeight: 700, color: INK },
   tabVal: { fontSize: 11.5, color: "#8a9080", fontWeight: 600 },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18, alignItems: "start" },
   card: { background: "#fff", border: "1px solid #e3e0d4", borderRadius: 16, padding: 20, marginBottom: 18 },
