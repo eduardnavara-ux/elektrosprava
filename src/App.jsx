@@ -359,8 +359,8 @@ export default function App() {
           const pt = t === "Celkem" ? { dayKwh: devTotals.dayKwh, cost: devTotals.cost } : placeTotals[t];
           return (
             <button key={t} style={{ ...S.tab, ...(activePlace === t ? S.tabOn : {}) }} onClick={() => setActivePlace(t)}>
-              <span style={S.tabName}>{t}</span>
-              <span style={S.tabVal}>{fmtKc((pt?.cost || 0) * 30)}/měs</span>
+              <span style={{ ...S.tabName, ...(activePlace === t ? { color: "#fff" } : {}) }}>{t}</span>
+              <span style={{ ...S.tabVal, ...(activePlace === t ? { color: "#cfe0d3" } : {}) }}>{fmtKc((pt?.cost || 0) * 30)}/měs</span>
             </button>
           );
         })}
@@ -661,6 +661,7 @@ const S = {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=DM+Sans:wght@400;500;600;700&display=swap');
 * { box-sizing: border-box; } body { margin: 0; }
+button { -webkit-tap-highlight-color: transparent; -webkit-appearance: none; appearance: none; }
 .legend i { display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:5px; vertical-align:middle; }
 input:focus, button:focus-visible { outline: 2px solid ${ACCENT}; outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
