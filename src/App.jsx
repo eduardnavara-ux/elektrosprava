@@ -41,11 +41,21 @@ async function fetchSheetCsv(url, isNT, rates) {
 // Sazby vč. DPH 21 % — z faktury PRE 186630247, část B (D57d).
 const DEFAULT_RATES = { vtPerKwh: 4.414, ntPerKwh: 3.299, jisticPerMonth: 671.55, omPerMonth: 143.99 };
 
-// NT harmonogram D57d (ČEZ) — 20 h denně.
-const DEFAULT_NT = [
-  { from: 0, to: 8.25 }, { from: 9.25, to: 13.27 },
-  { from: 14.17, to: 19.18 }, { from: 20.17, to: 24 },
+// NT harmonogram D57d — reálné spínací časy ČEZ (povel a3b7dp01).
+// Liší se všední den vs víkend. Krátký blok 00:00–00:16 zanedbán (zaokrouhleno).
+const NT_WEEKDAY = [
+  { from: 1.17, to: 7.93 },   // 01:10–07:56
+  { from: 8.92, to: 13.27 },  // 08:55–13:16
+  { from: 14.17, to: 19.18 }, // 14:10–19:11
+  { from: 20.17, to: 24 },    // 20:10–24:00
 ];
+const NT_WEEKEND = [
+  { from: 1.17, to: 8.25 },   // 01:10–08:15
+  { from: 9.25, to: 13.27 },  // 09:15–13:16
+  { from: 14.17, to: 19.18 }, // 14:10–19:11
+  { from: 20.17, to: 24 },    // 20:10–24:00
+];
+const DEFAULT_NT = NT_WEEKDAY;
 
 // Lokality statku
 const PLACES = ["Dvůr & zahrada", "Stodola", "Špýchar", "Roubenka"];
@@ -118,11 +128,12 @@ export default function App() {
   const saved = loadSaved();
   const [rates, setRates] = useState(saved.rates || DEFAULT_RATES);
   const [ntBlocks, setNtBlocks] = useState(saved.ntBlocks || DEFAULT_NT);
+  const [dayType, setDayType] = useState("weekday"); // weekday | weekend
   const [tapoFiles, setTapoFiles] = useState([]);
   const [devices, setDevices] = useState(saved.devices || DEFAULT_DEVICES);
   const [season, setSeason] = useState(saved.season || "summer");
   const [activePlace, setActivePlace] = useState("Celkem");
-  const [openGroups, setOpenGroups] = useState({ "Domácnost": true, "Provoz": true, "Topení": false, "Kamery & síť": false });
+  const [openGroups, setOpenGroups] = useState({ "Domácnost": false, "Provoz": false, "Topení": false, "Kamery & síť": false });
   const [fve, setFve] = useState(saved.fve || {
     enabled: false,
     kwp: 7,
@@ -317,7 +328,7 @@ export default function App() {
     return g;
   }, [shownDevices, rates, season]);
 
-  const tabs = ["Celkem", ...PLACES];
+  const tabs = ["Celkem", ...PLACES, "☀ FVE"];
 
   return (
     <div style={S.page}>
@@ -356,6 +367,14 @@ export default function App() {
       {/* záložky lokalit */}
       <div style={S.tabs}>
         {tabs.map((t) => {
+          if (t === "☀ FVE") {
+            return (
+              <button key={t} style={{ ...S.tab, ...(activePlace === t ? S.tabOn : {}), ...(activePlace !== t ? S.tabFve : {}) }} onClick={() => setActivePlace(t)}>
+                <span style={{ ...S.tabName, ...(activePlace === t ? { color: "#fff" } : { color: GOLD }) }}>☀ FVE</span>
+                <span style={{ ...S.tabVal, ...(activePlace === t ? { color: "#cfe0d3" } : {}) }}>{fveCalc ? fmtKc(fveCalc.saveMonth) + "/měs" : "nastav"}</span>
+              </button>
+            );
+          }
           const pt = t === "Celkem" ? { dayKwh: devTotals.dayKwh, cost: devTotals.cost } : placeTotals[t];
           return (
             <button key={t} style={{ ...S.tab, ...(activePlace === t ? S.tabOn : {}) }} onClick={() => setActivePlace(t)}>
@@ -366,6 +385,9 @@ export default function App() {
         })}
       </div>
 
+      {activePlace === "☀ FVE" ? (
+        <FveMode fve={fve} setFve={setFve} fveCalc={fveCalc} season={season} fmt={fmt} fmtKc={fmtKc} S={S} RateRow={RateRow} />
+      ) : (
       <div style={S.grid}>
         <div>
           {GROUPS.map((gName) => {
@@ -465,7 +487,13 @@ export default function App() {
             )}
           </Card>
 
-          <Card title={`Nízký tarif — ${fmt(ntHours, 1)} h/den`} hint="D57d, dle ČEZ">
+          <Card title={`Nízký tarif — ${fmt(ntHours, 1)} h/den`} hint="D57d, reálné časy ČEZ">
+            <div style={S.dayTypeTog}>
+              <button style={{ ...S.dayTypeBtn, ...(dayType === "weekday" ? S.dayTypeOn : {}) }}
+                onClick={() => { setDayType("weekday"); setNtBlocks(NT_WEEKDAY); }}>Po–Pá</button>
+              <button style={{ ...S.dayTypeBtn, ...(dayType === "weekend" ? S.dayTypeOn : {}) }}
+                onClick={() => { setDayType("weekend"); setNtBlocks(NT_WEEKEND); }}>Víkend</button>
+            </div>
             {ntBlocks.map((b, i) => (
               <div key={i} style={S.ntRow}>
                 <span style={S.ntDot} />
@@ -483,61 +511,10 @@ export default function App() {
                   style={{ ...S.dayCell, background: isNT(h + 0.5) ? "#2d6a4f" : "#e8b04b" }} />
               ))}
             </div>
-            <div style={S.legend}><span><i style={{ background: "#e8b04b" }} /> VT</span><span><i style={{ background: "#2d6a4f" }} /> NT</span></div>
-          </Card>
-
-          <Card title="☀ Fotovoltaika" hint={fve.enabled ? "Odhad výroby a rozdělení přebytků" : "Výhledově — zapni a nastav"}>
-            <label style={S.fveToggle}>
-              <input type="checkbox" checked={fve.enabled} onChange={(e) => setFve((f) => ({ ...f, enabled: e.target.checked }))} />
-              <span>Mám / plánuji FVE</span>
-            </label>
-            {fve.enabled && (
-              <div style={{ marginTop: 14 }}>
-                <RateRow label="Výkon panelů" unit="kWp" value={fve.kwp} onChange={(v) => setFve((f) => ({ ...f, kwp: v }))} />
-                <RateRow label="Roční výnos (jih, 44°)" unit="kWh/kWp" value={fve.yieldPerKwp} onChange={(v) => setFve((f) => ({ ...f, yieldPerKwp: v }))} />
-                <RateRow label="Výkupní cena přetoků" unit="Kč/kWh" value={fve.sellPrice} onChange={(v) => setFve((f) => ({ ...f, sellPrice: v }))} />
-                <RateRow label="Cena instalace" unit="Kč" value={fve.installCost} onChange={(v) => setFve((f) => ({ ...f, installCost: v }))} />
-
-                <div style={S.prioHead}>Priority přebytků (kaskáda)</div>
-                <div style={S.prioNote}>Vyrobená elektřina se rozdělí v tomto pořadí. Co zbude, jde do sítě.</div>
-
-                <div style={S.prioRow}>
-                  <span style={S.prioNum}>1</span>
-                  <span style={S.prioLabel}>Dům (přímá spotřeba)</span>
-                  <span style={S.prioFixed}>vždy</span>
-                </div>
-                <div style={S.prioRow}>
-                  <span style={S.prioNum}>2</span>
-                  <label style={S.prioCheck}><input type="checkbox" checked={fve.prio.water.on} onChange={(e) => setFve((f) => ({ ...f, prio: { ...f.prio, water: { ...f.prio.water, on: e.target.checked } } }))} /><span>Ohřev vody</span></label>
-                  <input style={S.prioCap} type="number" value={fve.prio.water.capKwh} onChange={(e) => setFve((f) => ({ ...f, prio: { ...f.prio, water: { ...f.prio.water, capKwh: +e.target.value } } }))} /><span style={S.u}>kWh/d</span>
-                </div>
-                <div style={S.prioRow}>
-                  <span style={S.prioNum}>3</span>
-                  <label style={S.prioCheck}><input type="checkbox" checked={fve.prio.car.on} onChange={(e) => setFve((f) => ({ ...f, prio: { ...f.prio, car: { ...f.prio.car, on: e.target.checked } } }))} /><span>Baterie auta</span></label>
-                  <input style={S.prioCap} type="number" value={fve.prio.car.capKwh} onChange={(e) => setFve((f) => ({ ...f, prio: { ...f.prio, car: { ...f.prio.car, capKwh: +e.target.value } } }))} /><span style={S.u}>kWh/d</span>
-                </div>
-                <div style={S.prioRow}>
-                  <span style={S.prioNum}>4</span>
-                  <label style={S.prioCheck}><input type="checkbox" checked={fve.prio.battery.on} onChange={(e) => setFve((f) => ({ ...f, prio: { ...f.prio, battery: { ...f.prio.battery, on: e.target.checked } } }))} /><span>Domácí baterie</span></label>
-                  <input style={S.prioCap} type="number" value={fve.prio.battery.capKwh} onChange={(e) => setFve((f) => ({ ...f, prio: { ...f.prio, battery: { ...f.prio.battery, capKwh: +e.target.value } } }))} /><span style={S.u}>kWh/d</span>
-                </div>
-
-                {fveCalc && (
-                  <div style={S.fveResult}>
-                    <div style={S.fveResRow}><span>Výroba ({season === "summer" ? "léto" : "zima"})</span><strong>{fmt(fveCalc.prodMonth, 0)} kWh/měs</strong></div>
-                    {fveCalc.steps.map((st) => (
-                      <div key={st.key} style={{ ...S.fveResRow, ...(st.key === "grid" ? { color: "#9aa090" } : {}) }}>
-                        <span>{st.label}</span>
-                        <strong>{fmt(st.kwh, 0)} kWh · {fmtKc(st.save)}</strong>
-                      </div>
-                    ))}
-                    <div style={{ ...S.fveResRow, ...S.fveResAccent }}><span>Úspora celkem</span><strong>{fmtKc(fveCalc.saveMonth)}/měs</strong></div>
-                    <div style={S.fveResRow}><span>Hrubá návratnost</span><strong>~{fmt(fveCalc.payback, 1)} let</strong></div>
-                  </div>
-                )}
-                <p style={S.note}>Hrubý odhad. FVE vyrábí přes den — největší úsporu má přesun spotřeby (bojler, auto, DEVI akumulace, čerpadla) do polední výroby. Bojler je nejlevnější „baterie". Domácí baterie u tarifu D57d (20 h NT) má slabší návratnost — zváž až po bojleru a autě. Až bude FVE reálná, dolaď výnos i kapacity.</p>
-              </div>
-            )}
+            <div style={S.legend}>
+              <span style={S.legendItem}><i style={{ ...S.legendDot, background: "#e8b04b" }} /> VT (vysoký tarif)</span>
+              <span style={S.legendItem}><i style={{ ...S.legendDot, background: "#2d6a4f" }} /> NT (nízký tarif)</span>
+            </div>
           </Card>
 
           <Card title="Sazby" hint="Z faktury PRE">
@@ -548,8 +525,113 @@ export default function App() {
           </Card>
         </div>
       </div>
+      )}
 
       <footer style={S.footer}>Rozděleno po budovách (Stodola = hlavní domácnost, Špýchar ve výstavbě pro babičku). Přepínač Léto/Zima nahoře mění sezónní spotřebiče. DEVI: 20 m² stodola + ~7 m² koupelna špýchar.</footer>
+    </div>
+  );
+}
+
+function FveMode({ fve, setFve, fveCalc, season, fmt, fmtKc, S, RateRow }) {
+  const set = (patch) => setFve((f) => ({ ...f, ...patch }));
+  const setPrio = (key, patch) => setFve((f) => ({ ...f, prio: { ...f.prio, [key]: { ...f.prio[key], ...patch } } }));
+  return (
+    <div>
+      {!fve.enabled ? (
+        <div style={S.fveIntro}>
+          <h2 style={S.fveIntroTitle}>☀ Fotovoltaika</h2>
+          <p style={S.fveIntroText}>
+            Statek má jižní střechu Špýcharu (sklon 44°) ideální pro panely. Zapni FVE
+            a appka spočítá výrobu, rozdělení přebytků podle priorit (dům → voda → auto →
+            baterie → síť) a úsporu. Zatím na odhadech — až bude instalace reálná, dolaď čísla.
+          </p>
+          <label style={S.fveBigToggle}>
+            <input type="checkbox" checked={fve.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+            <span>Mám / plánuji FVE</span>
+          </label>
+        </div>
+      ) : (
+        <>
+          {fveCalc && (
+            <section style={S.summaryRow}>
+              <Stat label={`Výroba (${season === "summer" ? "léto" : "zima"})`} value={fmt(fveCalc.prodMonth, 0) + " kWh"} accent />
+              <Stat label="Vlastní spotřeba" value={fmt(fveCalc.selfRate * 100, 0) + " %"} />
+              <Stat label="Přetok do sítě" value={fmt(fveCalc.surplusMonth, 0) + " kWh"} />
+              <Stat label="Úspora / měs" value={fmtKc(fveCalc.saveMonth)} big />
+            </section>
+          )}
+
+          <div style={S.grid}>
+            <div>
+              <Card title="Parametry FVE" hint="Jih, sklon 44°">
+                <label style={S.fveToggle}>
+                  <input type="checkbox" checked={fve.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+                  <span>FVE aktivní</span>
+                </label>
+                <div style={{ marginTop: 12 }}>
+                  <RateRow label="Výkon panelů" unit="kWp" value={fve.kwp} onChange={(v) => set({ kwp: v })} />
+                  <RateRow label="Roční výnos" unit="kWh/kWp" value={fve.yieldPerKwp} onChange={(v) => set({ yieldPerKwp: v })} />
+                  <RateRow label="Výkupní cena přetoků" unit="Kč/kWh" value={fve.sellPrice} onChange={(v) => set({ sellPrice: v })} />
+                  <RateRow label="Cena instalace" unit="Kč" value={fve.installCost} onChange={(v) => set({ installCost: v })} />
+                </div>
+              </Card>
+
+              <Card title="Priority přebytků" hint="Kam teče vyrobená elektřina">
+                <div style={S.prioNote}>Vyrobená elektřina se rozdělí v tomto pořadí. Co zbude, jde do sítě za výkupní cenu.</div>
+                <div style={S.prioRow}>
+                  <span style={S.prioNum}>1</span>
+                  <span style={S.prioLabel}>Dům (přímá spotřeba)</span>
+                  <span style={S.prioFixed}>vždy</span>
+                </div>
+                <div style={S.prioRow}>
+                  <span style={S.prioNum}>2</span>
+                  <label style={S.prioCheck}><input type="checkbox" checked={fve.prio.water.on} onChange={(e) => setPrio("water", { on: e.target.checked })} /><span>Ohřev vody (bojler)</span></label>
+                  <input style={S.prioCap} type="number" value={fve.prio.water.capKwh} onChange={(e) => setPrio("water", { capKwh: +e.target.value })} /><span style={S.u}>kWh/d</span>
+                </div>
+                <div style={S.prioRow}>
+                  <span style={S.prioNum}>3</span>
+                  <label style={S.prioCheck}><input type="checkbox" checked={fve.prio.car.on} onChange={(e) => setPrio("car", { on: e.target.checked })} /><span>Baterie auta</span></label>
+                  <input style={S.prioCap} type="number" value={fve.prio.car.capKwh} onChange={(e) => setPrio("car", { capKwh: +e.target.value })} /><span style={S.u}>kWh/d</span>
+                </div>
+                <div style={S.prioRow}>
+                  <span style={S.prioNum}>4</span>
+                  <label style={S.prioCheck}><input type="checkbox" checked={fve.prio.battery.on} onChange={(e) => setPrio("battery", { on: e.target.checked })} /><span>Domácí baterie</span></label>
+                  <input style={S.prioCap} type="number" value={fve.prio.battery.capKwh} onChange={(e) => setPrio("battery", { capKwh: +e.target.value })} /><span style={S.u}>kWh/d</span>
+                </div>
+                <p style={S.note}>Bojler je nejlevnější „baterie". U tarifu D57d (20 h NT) má domácí baterie slabší návratnost — zváž až po bojleru a autě.</p>
+              </Card>
+            </div>
+
+            <div>
+              <Card title="Rozdělení výroby" hint={season === "summer" ? "léto" : "zima"}>
+                {fveCalc ? (
+                  <div style={S.fveResult}>
+                    <div style={S.fveResRow}><span>Výroba celkem</span><strong>{fmt(fveCalc.prodMonth, 0)} kWh/měs</strong></div>
+                    {fveCalc.steps.map((st) => (
+                      <div key={st.key} style={{ ...S.fveResRow, ...(st.key === "grid" ? { color: "#9aa090" } : {}) }}>
+                        <span>{st.label}</span>
+                        <strong>{fmt(st.kwh, 0)} kWh · {fmtKc(st.save)}</strong>
+                      </div>
+                    ))}
+                    <div style={{ ...S.fveResRow, ...S.fveResAccent }}><span>Úspora celkem</span><strong>{fmtKc(fveCalc.saveMonth)}/měs</strong></div>
+                    <div style={S.fveResRow}><span>Nový účet / měs</span><strong>{fmtKc(fveCalc.newBill)}</strong></div>
+                    <div style={S.fveResRow}><span>Hrubá návratnost</span><strong>~{fmt(fveCalc.payback, 1)} let</strong></div>
+                  </div>
+                ) : <p style={S.empty}>Zapni FVE a vyplň parametry.</p>}
+              </Card>
+
+              <Card title="Tip na úsporu" hint="Přesun spotřeby pod panely">
+                <p style={S.note}>
+                  FVE vyrábí přes den, špička v poledne. Největší úsporu má přesun velkých
+                  spotřebičů (bojler, myčka, pračka, čerpadla, dobíjení auta, akumulace DEVI)
+                  do polední výrobní špičky. U tebe je výhoda strmá střecha (44°) — lépe
+                  vyrábí na jaře/podzim a v zimě, kdy je slunce níž a ty topíš.
+                </p>
+              </Card>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -636,6 +718,16 @@ const S = {
   dayStrip: { display: "grid", gridTemplateColumns: "repeat(24, 1fr)", gap: 2, marginTop: 16, height: 26, borderRadius: 6, overflow: "hidden" },
   dayCell: { width: "100%", height: "100%" },
   legend: { display: "flex", gap: 16, marginTop: 10, fontSize: 12, color: "#6a7060" },
+  dayTypeTog: { display: "flex", gap: 4, marginBottom: 14, background: "#f0ede1", borderRadius: 9, padding: 3, width: "fit-content" },
+  dayTypeBtn: { border: "none", background: "none", padding: "6px 14px", borderRadius: 7, fontSize: 13, fontWeight: 600, color: "#8a9080", cursor: "pointer", fontFamily: "inherit" },
+  dayTypeOn: { background: ACCENT, color: "#fff" },
+  tabFve: { background: "#fdf9ef", border: "1px solid #ecdcb8" },
+  fveIntro: { background: "#fff", border: "1px solid #e3e0d4", borderRadius: 16, padding: "32px 28px", textAlign: "center", maxWidth: 560, margin: "0 auto" },
+  fveIntroTitle: { fontFamily: "'Fraunces', serif", fontSize: 28, fontWeight: 600, margin: "0 0 12px" },
+  fveIntroText: { fontSize: 14.5, color: "#5a6450", lineHeight: 1.6, marginBottom: 20 },
+  fveBigToggle: { display: "inline-flex", alignItems: "center", gap: 10, fontSize: 15, fontWeight: 600, cursor: "pointer", background: "#fbfaf5", border: "1px solid #e3e0d4", borderRadius: 10, padding: "12px 20px" },
+  legendItem: { display: "flex", alignItems: "center", gap: 5 },
+  legendDot: { display: "inline-block", width: 11, height: 11, borderRadius: 3 },
   rateRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   rateLabel: { fontSize: 13.5 },
   rateInputWrap: { display: "flex", alignItems: "center", gap: 8 },
@@ -661,6 +753,7 @@ const S = {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=DM+Sans:wght@400;500;600;700&display=swap');
 * { box-sizing: border-box; } body { margin: 0; }
+/* iOS: nevynucuj systémovou modrou na tlačítkách (inline barvy mají přednost) */
 button { -webkit-tap-highlight-color: transparent; -webkit-appearance: none; appearance: none; }
 .legend i { display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:5px; vertical-align:middle; }
 input:focus, button:focus-visible { outline: 2px solid ${ACCENT}; outline-offset: 1px; }
